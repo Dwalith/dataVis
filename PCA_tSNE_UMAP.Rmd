@@ -1,0 +1,1245 @@
+---
+title: '**Exploratory analysis and visualization with PCA, tSNE and UMAP<br><font color=''#F48225'' size=''5''> Data visualization
+  (Course 2023/2024)**</font>'
+author: "<font color='#A8A8A8' size='3'>Janina Estañol, Pablo Perez & Lluís Giménez</font>"
+date: "<font color='#A8A8A8' size='3'>14 November 2023</font>"
+output:
+  html_document:
+    theme: yeti
+    css: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/all.css"
+    self_contained: yes
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 6, fig.height = 4, fig.align = "center")
+```
+
+```{r}
+# Define a function to make the PCA plots
+# We need to give 5 parameter:
+  # In the first 2 parameters we define the data that we are going to use
+  # In the third parameter we specify the variable that we are going to use to make colour
+  # The fourth and final parameters defines the title and subtitle of the plot
+plot_PCA <- function(data_1, metadata, colour_variable, title_val, substitle_val=NULL){
+  autoplot(data_1, data = metadata, colour=colour_variable) +
+  ggtitle(title_val) + theme_minimal() + theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))
+}
+
+
+# Define a function to make the tSNE plots
+# We need to give 9 parameter:
+  # In the first 2 parameters we define the data that we are going to use
+  # In the third and fourth parameters we specify the perplexity and maximum number of iterations
+  # In the fifth and sixth parameters we specify variables that we are going to color and shape 
+  # In the seventh and eight parameters we specify the title of the legend
+  # The final paramater specifies the title of the plot
+plot_tSNE <- function(data_tsne, metadata_tsne, perplexity_val, max_iter_val, col_var, sha_var, col_var_legend, sha_var_legend, title_val) {
+  
+  tsne <- Rtsne(data_tsne, perplexity = perplexity_val, max_iter = max_iter_val, pca = TRUE)
+  
+  # Create tsne_plot data frame
+  tsne_plot <- data.frame(
+    x = tsne$Y[, 1],
+    y = tsne$Y[, 2],
+    col = as.factor(metadata_tsne[[col_var]]), # Using [[ ]] for variable column names
+    sha = metadata_tsne[[sha_var]] # Using [[ ]] for variable column names
+  )
+  
+  # Plot the data
+  ggplot(tsne_plot) + 
+    geom_point(aes(x = x, y = y, color = col, shape = sha)) + 
+    labs(color = col_var_legend, shape = sha_var_legend) + 
+    scale_shape_manual(values = c(3, 16)) + 
+    labs(x = "tSNE1", y = "tSNE2", title = title_val)
+}
+
+plot_UMAP <- function(x_data, y_data, col, plot_title, x_label = "UMAP_1", y_label = "UMAP_2", sha = NULL) { 
+  
+  # If we do not give the parameter "sha"
+  if (is.null(sha)) {
+    # Create the dataframe used to generate the plot
+    custom_data <- data.frame(x_data, y_data, col)
+    colnames(custom_data) <- c("x_axis", "y_axis", "color_var")
+  
+    # Make the plot
+    custom_plot <- ggplot(custom_data, aes(x = x_axis, y = y_axis, color = color_var)) + 
+      geom_point() + 
+      ggtitle(plot_title) + 
+      theme_minimal() +
+      labs(x = x_label, y = y_label)
+  } else { # If we give the parameter "sha" 
+    # Create the dataframe used to generate the plot
+    custom_data <- data.frame(x_data, y_data, col, sha)
+    colnames(custom_data) <- c("x_axis", "y_axis", "color_var", "shape_var")
+    
+    # Make the plot
+    custom_plot <- ggplot(custom_data, aes(x = x_axis, y = y_axis, color = color_var, shape = shape_var)) + 
+      geom_point() + 
+      ggtitle(plot_title) + 
+      theme_minimal() +
+      labs(x = x_label, y = y_label)
+  }
+  
+  return(custom_plot)
+}
+```
+
+
+
+```{=html}
+<style>
+  .fig {width: 50%}
+  @import url(https://fonts.googleapis.com/css?family=Fira+Sans:300,300i,400,400i,500,500i,700,700i);
+  @import url(https://cdn.rawgit.com/tonsky/FiraCode/1.204/distr/fira_code.css);
+
+.center {
+  text-align: center;
+}
+
+.code_box {
+  padding: 1em 1em 1em 1em;
+  background: white;
+  color: #222222;
+  border: 2px solid #222222;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+.alternative_box {
+  padding: 1em;
+  background: white;
+  color: red4;
+  border: 2px solid red;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+.question_box {
+  padding: 1em;
+  background: white;
+  color: red4;
+  border: 2px solid blue;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+</style>
+```
+
+
+
+:::: {.code_box data-latex=""}
+**Introduction to the topic and dataset:**
+
+We are a team of bioinformaticians working for a company that provides scientific, statistical and bioinformatic consulting services. A customer from a very important sherry wine trade company wants to understand the differences between strains of *Saccharomyces cerevisiae* for different sherry wines products that they elaborate. 
+
+As you may know, flour strains of this yeast are principal microbial agents responsible for biological wine aging used for production of wines. The flour yeast velum formed on the surface of fortified fermented must is a major adaptive and technological characteristic of flour yeasts that helps them to withstanding stressful winemaking conditions and ensures specific biochemical and sensory oxidative alterations typical for sherry wines. 
+
+The user produces **two types of sherry wines (A and B)**, with different flavors, alcohol percentage and color. They are interested in deciphering if the differences between sherry wines classes are due to genetic differences in yeast or any other biochemical process that has not been controlled. 
+
+We recommended applying RNAseq technology for transcriptome analysis of these two industrial flour yeasts strains at different steps of velum development (**6 different times**) and multiple replicates (**4 replicates**). We ended up with 48 samples analyzed. 
+
+RNAseq reads were automatically quality checked, trimmed and filtered following default settings of packages such as fastqc and trimmomatic included in a RNA seq bioinformatics pipeline [source](https://github.com/HCGB-IGTP/RNA_seq_pipe). During the quality check, a sample produced unusual results but was not discarded. Please take into account this and discard it if necessary after the normalization process. Mapping to the reference genome and feature count of genes was produced using Hisat2 and featureCounts packages, also included in the previous pipeline mentioned. 
+
+**For each of the 4 replicates, a gene count matrix was generated and saved as a comma separated file within the data folder provided.** 
+
+Your goal in this project is to decipher if there are genetic differences between sherry wine yeast strains that might be reflected in the wine tasting.
+
+I encourage you to show what you know and interpret what you see in a plot using the theory we learned.
+
+Provide different visualization and/or code alternatives.
+::::
+
+
+# Requirements
+```{r message=FALSE, cache=TRUE, warning=FALSE}
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(ggfortify)
+library(factoextra)
+library(Rtsne)
+library(plotly)
+library(dplyr)
+set.seed(12345)
+```
+
+# QUESTION #1: Load, adapt the data and create metadata
+
+## Load data into variables: 
+First of all, load the four different replicates provided as separate files into separate variables. 
+Once loaded into R, check if the data matches what you expected and take a brief view of the data.
+
+```{r message=FALSE, cache=TRUE}
+
+## Read data into separate variables
+rep1 <- read.csv("data/rep1.csv",header = TRUE)
+rep2 <- read.csv("data/rep2.csv",header = TRUE)
+rep3 <- read.csv("data/rep3.csv",header = TRUE)
+rep4 <- read.csv("data/rep4.csv",header = TRUE)
+
+```
+
+Check the dimensions of each replicate file individually and then check that all files have the same dimension.
+
+```{r message=FALSE, cache=TRUE}
+
+dim_rep1 <- dim(rep1)
+dim_rep2 <- dim(rep2)
+dim_rep3 <- dim(rep3)
+dim_rep4 <- dim(rep4)
+
+data <- data.frame(
+  row.names = c("rep1", "rep2", "rep3","rep4"),
+  Row_Number = c(dim_rep1[1],dim_rep2[1],dim_rep3[1],dim_rep4[1]),
+  Column_Number = c(dim_rep1[2],dim_rep2[2],dim_rep3[2],dim_rep4[2])
+)
+
+# Create table using kable
+knitr::kable(data, caption = "Dimensions Table", format = "html")
+
+
+all(sapply(list(rep1, rep2, rep3), function(df) all.equal(dim(df), dim(rep4))))
+```
+
+As we can see in the table, all replicates have the same dimensions
+
+## Adapt the data accordingly and merge both tables of observations
+We need columns of the tables to represent variables (genes) and rows to be samples. Therefore, we need to **transpose** the data of the matrices and then merge all tables of observations. Check all samples are in the same order. 
+
+```{r, cache=TRUE}
+
+t_rep1 <- t(rep1)
+t_rep2 <- t(rep2)
+t_rep3 <- t(rep3)
+t_rep4 <- t(rep4)
+# Convert Genes variabels into column names
+colnames(t_rep1) <- t_rep1[1, ]
+colnames(t_rep2) <- t_rep2[1, ]
+colnames(t_rep3) <- t_rep3[1, ]
+colnames(t_rep4) <- t_rep4[1, ]
+# Remove the first row (since it's now the column names)
+t_rep1 <- t_rep1[-1, ]
+t_rep2 <- t_rep2[-1, ]
+t_rep3 <- t_rep3[-1, ]
+t_rep4 <- t_rep4[-1, ]
+
+# Merge the data tables into one by rows
+merged_data <- rbind(t_rep1, t_rep2, t_rep3, t_rep4)
+
+row_names <- rownames(merged_data)
+
+# Convert all values to numeric
+merged_data <- apply(merged_data, 2, function(x) as.numeric(as.character(x)))
+
+# Assign back the row names
+rownames(merged_data) <- row_names
+
+# Brief summary of the data
+head(as.data.frame(merged_data[, 1:8]), n=5)
+```
+
+Check dimensions of the final merged data
+
+```{r}
+# Dimensions of the data
+dim(merged_data)
+```
+
+## Get metadata associated:
+Create a meta data dataframe containing information regarding replicate, strains and time points. Information is either included in the sample name or in the introduction to the dataset stated above.
+
+```{r get_data}
+
+all_rown <- rownames(merged_data)
+
+# Use lapply to iterate over each row and extract components
+components_list <- lapply(all_rown, function(row) {
+  components <- str_split(row, '\\.|_')[[1]]
+  list(strain = components[1], time = as.numeric(str_extract(components[2], "\\d+")), replicate = as.numeric(str_extract(components[3], "\\d+")))
+})
+
+# Use sapply to extract each component into a separate list
+strain_list <- sapply(components_list, function(x) x$strain)
+time_list <- sapply(components_list, function(x) x$time)
+replicate_list <- sapply(components_list, function(x) x$replicate)
+
+# Create metadata data frame
+metadata <- data.frame(
+  row.names = row.names(merged_data),
+  replicate = as.factor(replicate_list),
+  strain = as.factor(strain_list),
+  time = as.factor(time_list)
+)
+
+head(metadata, n = 6)
+```
+
+# QUESTION #2: PCA representation
+
+## Create a PCA - NOT SCALED:
+Perform a PCA on your merged data and plot the results according to the strain, time points, and replicate ID and check plots generated to check results:
+
+```{r}
+pca = prcomp(merged_data)
+
+# Color by treatment and replicate ID. Use several packages
+data_p <- data.frame(PC1 = pca$x[, 1], PC2 = pca$x[, 2], Replicate = metadata$replicate, Strain = metadata$strain, Time = metadata$time)
+```
+
+
+### None-scaled PCA {.tabset}
+
+#### Plot Replicate 1
+```{r cache=FALSE, warning=FALSE}
+plot(data_p$PC1, data_p$PC2, pch = 19, col = interaction(data_p$Replicate), main = "PCA Plot - Color by Replicate", xlab = "PC1", ylab = "PC2") 
+```
+
+#### Plot Strain 1
+```{r}
+plot(data_p$PC1, data_p$PC2, pch = 19, col = interaction(data_p$Strain), main = "PCA Plot - Color by Strain", xlab = "PC1", ylab = "PC2") 
+```
+
+#### Plot Time 1
+```{r}
+plot(data_p$PC1, data_p$PC2, pch = 19, col = interaction(data_p$Time), main = "PCA Plot - Color by Time Points", xlab = "PC1", ylab = "PC2")
+```
+
+#### Plot Replicate 2
+```{r, cache=TRUE}
+plot_PCA(pca, metadata, "replicate", "PCA Plot - Color by Replicate")
+```
+
+#### Plot Strain 2
+```{r, cache=TRUE}
+plot_PCA(pca, metadata, "strain", "PCA Plot - Color by Strain")
+```
+
+#### Plot Time 2
+```{r, cache=TRUE}
+plot_PCA(pca, metadata, "time", "PCA Plot - Color by Time")
+```
+
+#### Plot Replicate 3
+```{r, cache=TRUE}
+factoextra::fviz_pca_ind(pca, geom.ind = "point", col.ind = metadata$replicate, addEllipses = TRUE) +
+  ggtitle("PCA Plot - Color by Replicate") + theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+#### Plot Strain 3
+```{r, cache=TRUE}
+factoextra::fviz_pca_ind(pca, geom.ind = "point", col.ind = metadata$strain, addEllipses = TRUE) +
+  ggtitle("PCA Plot - Color by Strain") + theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+#### Plot Time 3
+```{r, cache=TRUE}
+factoextra::fviz_pca_ind(pca, geom.ind = "point", col.ind = metadata$time, addEllipses = TRUE) +
+  ggtitle("PCA Plot - Color by Time Point") + theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+## {-}
+
+#### Plot variance explained by each principal component - NOT SCALED
+```{r cache=TRUE, warning=FALSE}
+fviz_eig(pca, xlab = "PC", ylab = "Variance", main = "Variance for each PC")
+```
+
+
+::: {.question_box data-latex=""}
+**Interpretation of the PCA without scaling: **
+
+If we color by Strain, we can see that PC1 does not separate both classes, since both strains can be found all along the X axis. But PC2 does separate them, since high values of PC2 are associated with Strain A and low values of PC2 are associated with Strain B.
+
+If we color by Replicate, we can see that the four replicates cluster into four distinct groups, which indicates the presence of a batch effect. Moreover, we can also see an outlier, that will be removed after, that corresponds to one sample from the replicate 3.
+
+If we color by Time, there are no evident clusters. In each group, there are samples that correspond to different times.
+
+Note that it's important to understand the contribution of each principal component (PC) to the separation of classes. In our case, PC1 explains most of the variance, PC2 explains some variance and the other PC explain very low variance.
+:::
+
+
+## Create a PCA - SCALED:
+Perform a PCA on your merged data and plot the results according to the strain, time points, and replicate ID and check plots generated to check results.
+
+###Fix data
+To do this, we first need to check if all genes are expressed and, if not, remove them. 
+
+```{r cache=TRUE, warning=FALSE}
+
+# Identify columns with only 0.
+sum <- apply(merged_data, 2, sum)
+constant_cols <- which(sum == 0)
+print(constant_cols)
+```
+
+As we can see, all genes are expressed; consequently there is no need to modify the initial data set. 
+
+
+### Create scaled PCA {.tabset}
+
+#### Plot Replicate 1
+```{r cache=TRUE, warning=FALSE}
+
+pca_res_scaled = prcomp(merged_data, scale. = TRUE)
+
+# Color by treatment and replicate ID. Use several packages
+data_p_scaled <- data.frame(PC1 = pca_res_scaled$x[, 1], PC2 = pca_res_scaled$x[, 2], Replicate = metadata$replicate, Strain = metadata$strain, Time = metadata$time)
+
+plot(data_p_scaled$PC1, data_p_scaled$PC2, pch = 19, col = interaction(data_p_scaled$Replicate), main = "PCA Plot - Color by Replicate", xlab = "PC1", ylab = "PC2") 
+
+```
+
+#### Plot Strain 1
+
+```{r, cache=TRUE}
+plot(data_p_scaled$PC1, data_p_scaled$PC2, pch = 19, col = interaction(data_p_scaled$Strain), main = "PCA Plot - Color by Strain", xlab = "PC1", ylab = "PC2") 
+```
+
+#### Plot Time 1
+```{r, cache=TRUE}
+plot(data_p_scaled$PC1, data_p_scaled$PC2, pch = 19, col = interaction(data_p_scaled$Time), main = "PCA Plot - Color by Time Points", xlab = "PC1", ylab = "PC2") 
+```
+
+#### Plot Replicate 2
+```{r, cache=TRUE}
+plot_PCA(pca_res_scaled, metadata, "replicate", "PCA Plot - Color by Replicate")
+```
+
+#### Plot Strain 2
+```{r, cache=TRUE}
+plot_PCA(pca_res_scaled, metadata, "strain", "PCA Plot - Color by Strain")
+```
+
+#### Plot Time 2
+```{r, cache=TRUE}
+plot_PCA(pca_res_scaled, metadata, "time", "PCA Plot - Color by Time")
+```
+
+#### Plot Replicate 3
+```{r, cache=TRUE}
+factoextra::fviz_pca_ind(pca_res_scaled, geom.ind = "point", col.ind = metadata$replicate, addEllipses = TRUE) +
+   ggtitle("PCA Plot - Color by Replicate") + theme(
+   plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+#### Plot Strain 3
+```{r, cache=TRUE}
+factoextra::fviz_pca_ind(pca_res_scaled, geom.ind = "point", col.ind = metadata$strain, addEllipses = TRUE) +
+  ggtitle("PCA Plot - Color by Strain") + theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+#### Plot Time 3
+```{r, cache=TRUE}
+factoextra::fviz_pca_ind(pca_res_scaled, geom.ind = "point", col.ind = metadata$time, addEllipses = TRUE) +
+ ggtitle("PCA Plot - Color by Time Point") + theme(
+   plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+## {-}
+
+
+### Plot variance explained by each principal component -SCALED
+```{r cache=TRUE, warning=FALSE}
+fviz_eig(pca_res_scaled, xlab = "PC", ylab = "Variance", main = "Variance for each PC")
+```
+
+::: {.question_box data-latex=""}
+**Interpretation of the scaled PCA: **
+
+Again, we can see the exact same results as before, with minimal differences: 
+
+1. Still, if we color by Strain, we can see that PC1 does not separate both classes, since both strains can be found all along the X axis. But PC2 does separate them, since high values of PC2 are associated with Strain A and low values of PC2 are associated with Strain B.
+
+2. If we color by Replicate, we can see that the four replicates cluster into four distinct groups, which indicates that the batch effect has not been solved. In this case, we can not see the outlier because it has been removed previously.
+
+3. If we color by Time, there are no evident clusters. In each group, there are samples that correspond to different times.
+
+Also, PC1 still explains most of the variance, PC2 explains some variance and the other PC explain very low variance.
+
+:::
+
+<div style="border: 2px solid #ccc; padding: 10px; background-color: #f9f9f9;">
+  <p> As we have seen, PCA, t-SNE and UMAP plots can be done with a huge amount of functions and packages such as autoplot, ggplot, factoextra,plot,... Instead of performing the same plot in different ways using other functions, we have decided to just do plots using ggplot package and autoplot from this point to the end. In order to do not add too much plots in our report. </p>
+</div>
+
+## Normalization of the data:
+
+### Correlations {.tabset}
+We need to find a variable that highly correlates with PC1. We would
+check for the total gene expression per cell. In RNA-seq experiments the
+data is normalized using different factors such as library size (number
+of genes) or gene length.
+
+
+#### Total expression vs Replicates
+```{r, cache=TRUE}
+plot(rowSums(merged_data), type = 'h', col = metadata$replicate, 
+     xlab = "Index", ylab = "expression")
+legend("topleft", legend = unique(metadata$replicate),
+       fill = unique(metadata$replicate), title = "Replicate")
+```
+
+#### Total expression PCA
+```{r cache=TRUE}
+# Calculate total expression per sample
+metadata$totalExpression <- rowSums(merged_data)
+autoplot(pca_res_scaled, data = metadata, colour="totalExpression")
+
+```
+
+## {-}
+
+By looking at the resulting plots, we can state that the different replicates have different amount of expression and as a consequence we observe the batch effect associated to the replicates.
+
+### Test for significance
+
+We need to test for significance.
+
+```{r get_correlations, cache=TRUE}
+components <- as_tibble(pca_res_scaled$x) %>% bind_cols(metadata) %>% as.data.frame()
+components$totalExpression <- rowSums(merged_data)
+regression <- lm(PC1 ~ components$totalExpression, components)
+summary(regression)
+
+plot(components$totalExpression, components$PC1,
+     xlab = "Total Gene Expression", ylab = "PC1",
+     main = "Scatter Plot of Total Gene Expression vs PC1",
+     col = "blue", pch = 16, cex = 0.7)  # Adjust point color, shape, and size
+
+# Add grid lines for better readability
+grid()
+
+abline(lm(components$PC1 ~ components$totalExpression), col = "red", lty = 2)
+```
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+It seems we have a significant correlation between the first principal component and the level of total gene expression of the samples.
+There is a direct relationship, meaning that if we increase the total gene expression, the PC1 value also increases.
+
+For this reason we should normalize the data by total gene expression per sample. Thus, we would be using its relative expression and we would not have this problem.
+
+Samples can have low or no expression due to several reasons. We may be using a different library size or gene length among samples. Also, RNA can be easily degraded (not as stable as DNA) and maybe for this reason we see a lower expression than we should. Or simply because the cells are not alive and therefore there is no gene expression.
+:::
+
+## DATA NORMALIZATION {.tabset}
+
+After this initial exploration we have realized that we should normalize
+each cell by the total expression. 
+
+```{r}
+normalized_data = merged_data/rowSums(merged_data)
+pca_norm <- prcomp(normalized_data, scale=TRUE)
+```
+
+
+### Normalized PCA 1
+```{r, cache=TRUE}
+plot_PCA(pca_norm, metadata, "replicate", "PCA Plot", "Color by Replicate without outlier")
+
+```
+
+### Normalized PCA 2
+```{r, cache=TRUE}
+factoextra::fviz_pca_ind(pca_norm, geom.ind = "point", col.ind = metadata$replicate , addEllipses = TRUE) +
+  ggtitle("PCA Plot - Color by Replicate") + theme(
+    plot.title = element_text(hjust = 0.5, face = "bold")) +
+  scale_color_discrete(name = "Replicate") +
+  labs(color = "Replicate") 
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+
+As we can clearly see, the outlier is far away from both clusters. So by performing a filtering on PC1 values we can get rid of it and continue with the experiment.
+Once we have performed the normalization, the batch effect has been solved since when we make a PCA by replicate we can not distinguish clusters associated to the replicates.  
+
+:::
+
+```{r}
+threshold <- -50
+pc1_values <- pca_norm$x[, 1]
+filtered_data <- merged_data[pc1_values >= threshold, ]
+filtered_metadata <- metadata[row.names(metadata) %in% row.names(filtered_data), ] 
+filtered_metadata$totalExpression <- rowSums(filtered_data)
+```
+
+## DATA NORMALIZATION WITHOUT OUTLIER {.tabset}
+
+After removing the outlier, we repeat again the normalization for the filtered data.
+
+```{r}
+normalized_filtered_data = filtered_data/rowSums(filtered_data)
+pca_norm <- prcomp(normalized_filtered_data, scale=TRUE)
+```
+
+### Normalized PCA 1
+```{r, cache=TRUE}
+plot_PCA(pca_norm, filtered_metadata, "replicate", "PCA Plot", "Color by Replicate without outlier")
+
+```
+
+### Normalized PCA 2
+```{r, cache=TRUE}
+factoextra::fviz_pca_ind(pca_norm, geom.ind = "point", col.ind = filtered_metadata$replicate, addEllipses = TRUE) +
+  ggtitle("PCA Plot - Color by Replicate") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  scale_color_discrete(name = "Replicate") +
+  labs(color = "Replicate") 
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+After the application of the filter we have removed the outlier that disturbed the good interpretation of the data distribution. 
+
+Now we can keep on with the rest of the analysis.
+:::
+
+# QUESTION #3: t-SNE representation
+
+## TSNE PLOTS {.tabset}
+
+Let's represent the data with a tSNE projection using just the raw data. 
+
+Note that since we have defined a **seed**, we will obtain reproducible results. Setting the random seed ensures that the stochastic aspects of the t-SNE algorithm are controlled and therefore we will obtain the same result each time. For example, the initialization will always be the same for each run.
+
+It is important to have reproducible results so that other people can replicate your results, which leads to more transparent and trustworthy work. Moreover, you will be able to make valid comparisons between different runs. So, we will be able to compare the results of different parameter settings when the randomness is controlled. If we see differences, they are due to the changes we have done in the parameters and not due to the randomness.
+
+Moreover, we see the parameter **pca = TRUE** to specify that we want to perform Principal Component Analysis on our data as a preprocessing step before running t-SNE. By doing this, we will reduce the dimensionality of the data and this will lead to a reduction in time because we have reduced the dimensionality of the data.
+
+### Raw data tSNE projection by Replicate and Strain
+```{r test_repro_1, cache=TRUE}
+plot_tSNE(merged_data, metadata, perplexity_val = 5, max_iter_val = 1000, col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", sha_var_legend = "Strain", title_val = "Raw data tSNE projection by Replicate and Strain")
+
+```
+
+
+### Raw data tSNE projection by Time and Strain
+```{r test_repro_2, cache=TRUE}
+plot_tSNE(merged_data, metadata, perplexity_val = 5, max_iter_val = 1000, 
+  col_var = "time", sha_var = "strain", col_var_legend = "Time", 
+  sha_var_legend = "Strain", title_val = "Raw data tSNE projection by Time and Strain")
+
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+
+Again, if we use the raw data, we can see a clear batch effect associated to the 4 replicates and an outlier on the top left part of the plot that corresponds to a sample from replicate 3.
+
+Moreover, there the samples are not being clustered according to the time point due to the batch effect.
+
+So, as mentioned before, there is a sample from replicate 3 that significantly differs from the other samples in the dataset. We consider that it might be an error as a consequence by removing it we can improve the overall quality and ensure that our analysis is based on reliable information. 
+
+:::
+
+
+## Remove batch effect by normalizing data appropriately.
+
+### TSNE PLOTS WITH NORMALIZED DATA {.tabset}
+We must remove the batch effect that we can clearly detect in our plots, as we have 4 different clusters where each corresponds to a different replicate. As we have stated before, there is a significant correlation between the first principal component and the level of total gene expression of the samples.
+
+For this reason we should normalize the data by total gene expression per sample. Thus, we would be using its relative expression and we would not have the batch effect.
+
+#### Normalized tSNE projection by Replicate and Strain
+```{r cache=TRUE}
+plot_tSNE(normalized_data, metadata, perplexity_val = 5, max_iter_val = 1000, 
+  col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", 
+  sha_var_legend = "Strain", title_val = "Normalized tSNE projection by Replicate and Strain")
+
+```
+
+#### Normalized tSNE projection by Replicate and Time
+```{r cache=TRUE}
+# Create tsne_plot data frame
+tsne2 <- Rtsne(normalized_data,perplexity = 5, max_iter = 1000, pca = TRUE)
+
+tsne_plot <- data.frame(
+  x = tsne2$Y[, 1],
+  y = tsne2$Y[, 2],
+  col = as.factor(metadata$replicate),
+  sha = metadata$time
+)
+
+# Plot the data
+ggplot(tsne_plot) + geom_point(aes(x = x, y = y, color = col, shape = sha)) +
+labs(color = "Replicate", shape = "Time") + labs(x = "tSNE1", y = "tSNE2", title = "Normalized tSNE projection by Time and Replicate")
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+Regarding the outlier, we can clearly see that t-SNE deals better with outliers compared to PCA. Now we repeat the plots with normalized data but without the outlier.
+
+After the data normalization we have seen that we just have 2 clusters mixing all replicates but having divergence by strains which is what we are interested in. Furthermore, we detect that within each cluster the Times are clustered together independently from the replicate they belong, which is something that we could expect.
+
+:::
+
+### TSNE PLOTS WITH NORMALIZED DATA AND WITHOUT OUTLIER {.tabset}
+
+#### Normalized tSNE projection by Replicate and Strain
+```{r  cache=TRUE}
+plot_tSNE(normalized_filtered_data, filtered_metadata, perplexity_val = 5, max_iter_val = 1000, 
+  col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", 
+  sha_var_legend = "Strain", title_val = "Normalized tSNE projection without the outlier")
+
+```
+
+#### Normalized tSNE projection by Replicate and Time
+```{r cache=TRUE}
+# Create tsne_plot data frame
+tsne2 <- Rtsne(normalized_filtered_data,perplexity = 5, max_iter = 1000, pca = TRUE)
+tsne_plot <- data.frame(
+  x = tsne2$Y[, 1],
+  y = tsne2$Y[, 2],
+  col = as.factor(filtered_metadata$replicate),
+  sha = filtered_metadata$time
+)
+
+# Plot the data
+ggplot(tsne_plot) + geom_point(aes(x = x, y = y, color = col, shape = sha)) +
+labs(color = "Replicate", shape = "Time") + labs(x = "tSNE1", y = "tSNE2", title = "Normalized tSNE projection", subtitle = "Time and Replicate without the outlier")
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+Now we can see how the replicates are distributed evently, between the location where the other samples from the same strain and time are.
+
+:::
+
+# QUESTION #4: t-SNE parameters
+
+## Test the effect of reproducibility
+In the case we did not set a seed, if we run again the t-SNE we will obtain a different plot but with the same meaning as the previous one.
+
+Every time you run t-SNE, new outcomes are obtained.
+Because t-SNE is a dimensionality reduction method that is susceptible to the algorithm's random initialization. 
+The final configuration of the data points might be affected by the initial conditions, therefore if you run t-SNE more than once, you might get slightly different results. 
+The optimization process may begin at various points as a result of this random initialization. As a result, it may lead to various low-dimensional data representations
+
+In order to reproduce tSNE results have used the set.seed() function to set a specific random seed before running t-SNE. This ensures that the random initialization of t-SNE is consistent across runs.
+
+As mentioned before, this is important because allows you to validate your results and ensure that the patterns and structures identified by t-SNE are not artifacts of random initialization.
+
+## Perplexity parameter
+Perplexity is a crucial hyperparameter that measures the effective number of neighbors to consider during the optimization process.
+
+```{r, cache=TRUE}
+max_perplexity <- (nrow(normalized_filtered_data) - 1) / 3
+
+print(paste("The maximum value for perplexity for our dataset is", max_perplexity))
+
+```
+
+## TSNE with different perplexity {.tabset}
+
+### Perplexity 1
+```{r perplexity_1, cache=TRUE}
+plot_tSNE(normalized_filtered_data, filtered_metadata, perplexity_val = 1,  max_iter_val = 1000, 
+  col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", sha_var_legend = "Strain", 
+  title_val = "tSNE projection at Perplexity = 1")
+
+```
+
+### Perplexity 5
+```{r cache=TRUE}
+plot_tSNE(normalized_filtered_data, filtered_metadata, perplexity_val = 5,  max_iter_val = 1000, 
+  col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", sha_var_legend = "Strain", 
+  title_val = "tSNE projection at Perplexity = 5")
+```
+
+
+### Perplexity 10
+```{r perplexity_10, cache=TRUE}
+plot_tSNE(normalized_filtered_data, filtered_metadata, perplexity_val = 10,  max_iter_val = 1000, 
+  col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", sha_var_legend = "Strain", 
+  title_val = "tSNE projection at Perplexity = 10")
+
+```
+
+### Perplexity 15
+```{r perplexity_15, cache=TRUE}
+plot_tSNE(normalized_filtered_data, filtered_metadata, perplexity_val = 15,  max_iter_val = 1000, 
+  col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", sha_var_legend = "Strain", 
+  title_val = "tSNE projection at Perplexity = 15")
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+As we know, perplexity affects the balance between preserving local and global structures in our data. It is a guess about the number of close neighbors each point has.
+
+A low perplexity emphasizes local structure. Meaning that the tSNE will focus on preserving nearby data points and small clusters. So, small clusters may be well represented but the global structure between distant clusters may not be accurate, resulting in a very fragmented plot.
+
+A large perplexity emphasize global structure. Meaning that the tSNE will focus on capturing the global relationship between data points and clusters. As a consequence, we will observe less small clusters because we are emphasizing the overall structure of the data.
+
+In this case we would use a perplexity equal to 5 because we consider it to be the best tradeoff between preserving local and global structures, since I can differentiate the different clusters. This does not happen specially when perplexity is 1.
+
+Moreover, note that perplexity can not be larger than 15 or the formula (nrow(X)-1) / 3) will not be fullfiled.
+
+:::
+
+
+## Iterations parameter{.tabset}
+
+### Iteration 1
+```{r iter_1, cache=TRUE}
+plot_tSNE(normalized_filtered_data, filtered_metadata, perplexity_val = 5, max_iter_val = 1, 
+  col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", sha_var_legend = "Strain", 
+  title_val = "tSNE projection with 1 iteration")
+
+```
+
+### Iteration 10
+```{r iter_10, cache=TRUE}
+plot_tSNE(normalized_filtered_data, filtered_metadata, perplexity_val = 5, max_iter_val = 10, 
+  col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", sha_var_legend = "Strain", 
+  title_val = "tSNE projection with 10 iterations")
+
+```
+
+
+### Iteration 100
+```{r iter_100, cache=TRUE}
+plot_tSNE(normalized_filtered_data, filtered_metadata, perplexity_val = 5, max_iter_val = 100, 
+  col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", sha_var_legend = "Strain", 
+  title_val = "tSNE projection with 100 iterations")
+```
+
+### Iteration 1000
+```{r iter_1000, cache=TRUE}
+plot_tSNE(normalized_filtered_data, filtered_metadata, perplexity_val = 5, max_iter_val = 1000, 
+  col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", sha_var_legend = "Strain", 
+  title_val = "tSNE projection with 1000 iterations")
+
+```
+
+### Iteration 10000
+```{r  cache=TRUE}
+plot_tSNE(normalized_filtered_data, filtered_metadata, perplexity_val = 5, max_iter_val = 10000, 
+  col_var = "replicate", sha_var = "strain", col_var_legend = "Replicate", sha_var_legend = "Strain", 
+  title_val = "tSNE projection with 10000 iterations")
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+The more iterations, the better. But it is not feasible to have a really big number of iterations (too expensive).
+
+As we know, tSNE is an iterative algorithm that improves the result one step at a time. Therefore, if we use too few iterations the clusters might not be visible, and we will have a big cloud of data points in the center of the tSNE plot. We can clearly see this when we use 1 iteration.
+
+To solve this, we need to increase the number of iterations until we can distinguish the clusters. But note that we will reach a point where the algorithm will reach convergence and further increasing the number of iterations will only marginally change the plot.
+
+In our case we have chosen as the best number of iterations to perform is 10000.
+:::
+
+
+# QUESTION #5: Final Interpretation
+
+## TSNE final interpretation {.tabset}
+
+```{r}
+X_tsne <- Rtsne(normalized_filtered_data, perplexity = 5 ,max_iter = 10000, pca = TRUE)
+```
+
+
+### tSNE 1
+```{r  cache=TRUE}
+tsne_plot <- data.frame(
+    x = X_tsne$Y[, 1],
+    y = X_tsne$Y[, 2],
+    col = as.factor(filtered_metadata$replicate),
+    sha = filtered_metadata$time
+  )
+# Plot grouping by Strain
+ggplot(tsne_plot) + geom_point(aes(x=x, y=y, color=filtered_metadata$totalExpression, shape = sha)) + scale_color_gradient(low = "green", high = "red") +
+  theme_light() + labs(color = "Expression", shape = "Time", title = "t-SNE by Time and Total Expression")
+```
+
+### tSNE 2
+```{r}
+tsne_plot <- data.frame(
+    x = X_tsne$Y[, 1],
+    y = X_tsne$Y[, 2],
+    col = as.factor(filtered_metadata$replicate),
+    sha = filtered_metadata$strain
+  )
+# Plot grouping by Strain
+ggplot(tsne_plot) + geom_point(aes(x=x, y=y, color=filtered_metadata$totalExpression, shape = sha)) + scale_color_gradient(low = "green", high = "red") +
+  theme_light() + labs(color = "Expression", shape = "Strain", title = "t-SNE by Strain and Total Expression")
+```
+
+## {-}
+
+Even though we can use this method to analyse high-dimensional data in a lower-dimensional space, we can get useful information from the plot just created. The cluster groups should lead to the assumption that the samples in them have characteristics that share; another way to look at it is that difference in clusters usually separates the samples from one another (even though distances between clusters may not represent true distances in the original space).
+
+## PCA final interpretation {.tabset}
+
+### PCA 1
+```{r}
+components <- as_tibble(pca_norm$x) %>% bind_cols(filtered_metadata) %>% as.data.frame()
+components$total <- rowSums(normalized_filtered_data)
+
+ggplot(components, aes(x = PC1, y = PC2, color = totalExpression, shape = strain)) + geom_point() + scale_color_gradient(low = "#00FF00", high = "#FF0000") + theme_linedraw() + labs(title = "PCA by Strain and Total Expression")
+```
+
+
+### PCA 2
+```{r}
+ggplot(components, aes(x = PC1, y = PC2, color = totalExpression, shape = time)) + geom_point() + scale_colour_gradient(name = "gene expression", low = "green", high = "red") + theme_linedraw() + labs(title = "PCA by Time and Total Expression")
+```
+
+## {-}
+
+PCA is a widely used method for dimensionality reductition that also retains as much variance as possible. As we can see from the plots, the samples show different gene expression levels despite the time conditions; we can see clear grouping of some of them that create clusters that don't seem to be a consequence.
+
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+We get the same conclusions as the PCA, even though the techniques are different. There are 2 main clusters which correspond to the 2 different strains and there are other subclusters that correspond to the different time points.
+
+Because even though they are different techniques, they have some similarities and we are using the same dataset, so I expect similar results. For example, they both reduce the dimensionality while preserving the cluster structure.
+
+Moreover, we could be working with linear data, meaning that the relationship between variables can be accurately represented using linear combinations. As a consequence, since both techniques can capture linear relationships, we will obtain similar results
+
+:::
+
+# QUESTION #6: UMAP interpretation
+
+First of all we are going to produce the results using raw data, in other words (original data) with the outlier and not normalized data.
+
+#### UMAP raw data {.tabset}
+
+### UMAP strain
+```{r}
+all_dataSet_UMAP <- umap::umap(merged_data)
+
+plot_UMAP(all_dataSet_UMAP$layout[,1], all_dataSet_UMAP$layout[,2], metadata$strain, sha = metadata$replicate, "UMAP: All data raw") + labs(color = "Strain", shape = "Replicate")
+```
+
+### UMAP Time
+```{r}
+plot_UMAP(all_dataSet_UMAP$layout[,1], all_dataSet_UMAP$layout[,2], metadata$time, sha = metadata$replicate, "UMAP: All data raw") + labs(color = "Time", shape = "Replicate")
+```
+
+## {-}
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+If we use the raw data, we can see a clear batch effect associated to the 4 replicates and an outlier.
+
+Moreover, there the samples are not being clustered according to the time point due to the batch effect.
+
+So, as mentioned before, there is a sample from replicate 3 that significantly differs from the other samples in the dataset. We consider that it might be an error as a consequence by removing it we can improve the overall quality and ensure that our analysis is based on reliable information
+:::
+
+
+#### UMAP normalized data with outlier {.tabset}
+
+We must remove the batch effect that we can clearly detect in our plots, as we have 4 different clusters where each corresponds to a different replicate. As we have stated before, there is a significant correlation between the first principal component and the level of total gene expression of the samples.
+
+For this reason we should normalize the data by total gene expression per sample. Thus, we would be using its relative expression and we would not have the batch effect.
+
+
+### UMAP Strain
+```{r}
+all_dataSet_UMAP_norm <- umap::umap(normalized_data)
+plot_UMAP(all_dataSet_UMAP_norm$layout[,1], all_dataSet_UMAP_norm$layout[,2], metadata$strain, sha = metadata$replicate, "UMAP: Normalized data with outlier") + labs(color = "Strain", shape = "Replicate")
+```
+
+### UMAP Time
+```{r}
+plot_UMAP(all_dataSet_UMAP_norm$layout[,1], all_dataSet_UMAP_norm$layout[,2], metadata$time, sha = metadata$replicate, "UMAP: Normalized data with outlier") + labs(color = "Time", shape = "Replicate")
+```
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+In this case UMAP handles even better than t-SNE and PCA with outliers. 
+
+After the data normalization we have seen that we just have 2 clusters mixing all replicates but having divergence by strains which is what we are interested in. Furthermore, we detect that within each cluster the Times are clustered together independently from the replicate they belong, which is something that we could expect.
+:::
+
+
+#### UMAP normalized data without outlier {.tabset}
+
+After doing the normalization plots with the outlier we can just remove it and perform again the normalization and the plotting.
+
+### UMAP Strain
+```{r}
+all_dataSet_UMAP_norm <- umap::umap(normalized_filtered_data)
+plot_UMAP(all_dataSet_UMAP_norm$layout[,1], all_dataSet_UMAP_norm$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Normalized data without outlier") + labs(color = "Strain", shape = "Replicate")
+```
+
+### UMAP Time
+```{r}
+plot_UMAP(all_dataSet_UMAP_norm$layout[,1], all_dataSet_UMAP_norm$layout[,2], filtered_metadata$time, sha = filtered_metadata$replicate, "UMAP: Normalized data without outlier") + labs(color = "Time", shape = "Replicate")
+```
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+The distribution of the data shows a clear separation between the samples belonging to group A and B. As for the time grouping, we can see how some of the samples belonging to different time measurements blend together; the outlier has been removed, so now we can see a clear separation of the samples by strain.
+
+:::
+
+
+
+# QUESTION #7: Predict the data
+
+We are going to predict using normalized and without outlier.
+
+```{r}
+rep1 <- normalized_filtered_data[0:12,]
+rest_rep <- normalized_filtered_data[13:nrow(normalized_filtered_data),]
+predicted_metadata <- filtered_metadata[13:nrow(filtered_metadata),]
+dataSet_UMAP_raw <- umap::umap(rep1, n_neighbors = 7, n_components = 2, min_dist = 0.9)
+
+
+dataset_predict = stats::predict(dataSet_UMAP_raw, rest_rep)
+```
+
+
+#### UMAP prediction data {.tabset}
+
+### Predicted data 1 Strain
+```{r}
+
+plot_UMAP(dataset_predict[,1], dataset_predict[,2], predicted_metadata$strain, sha = predicted_metadata$replicate, "UMAP: Prediction data") + labs(color = "Strain", shape = "Replicate")
+
+```
+
+### Predicted data 1 Time
+```{r}
+plot_UMAP(dataset_predict[,1], dataset_predict[,2], predicted_metadata$time, sha = predicted_metadata$replicate, "UMAP: Prediction data") + labs(color = "Time", shape = "Replicate")
+
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+Using replicate 1, the created predictions for the rest of the data fit the expectations, following the information we had from the former plots.
+
+:::
+
+
+# QUESTION #8: Explore parameters
+
+### UMAP Visualization for different values of n_neighbors {.tabset}
+
+#### Run UMAP with n_neighbors = 2
+
+```{r}
+umap_result <- umap::umap(normalized_filtered_data, n_neighbors = 2)
+plot_UMAP(umap_result$layout[,1], umap_result$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Number of Neighbors 2") + labs(color = "Strain", shape = "Replicate")
+
+```
+
+#### Run UMAP with n_neighbors = 5
+
+```{r}
+umap_result <- umap::umap(normalized_filtered_data, n_neighbors = 5)
+plot_UMAP(umap_result$layout[,1], umap_result$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Number of Neighbors 5") + labs(color = "Strain", shape = "Replicate")
+
+```
+#### Run UMAP with n_neighbors = 10
+
+```{r}
+umap_result <- umap::umap(normalized_filtered_data, n_neighbors = 10)
+plot_UMAP(umap_result$layout[,1], umap_result$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Number of Neighbors 10") + labs(color = "Strain", shape = "Replicate")
+
+```
+#### Run UMAP with n_neighbors = 20
+
+```{r}
+umap_result <- umap::umap(normalized_filtered_data, n_neighbors = 20)
+plot_UMAP(umap_result$layout[,1], umap_result$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Number of Neighbors 20") + labs(color = "Strain", shape = "Replicate")
+
+```
+
+#### Run UMAP with n_neighbors = 40
+
+```{r}
+umap_result <- umap::umap(normalized_filtered_data, n_neighbors = 40)
+plot_UMAP(umap_result$layout[,1], umap_result$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Number of Neighbors 40") + labs(color = "Strain", shape = "Replicate")
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+As we know, the number of neighbors a point can have can not be bigger than the actual data set, therefore the optimal number of neighbors that allow a correct separation to create clusters could be set to 20.
+
+:::
+
+### UMAP Visualization with Varying min_dist {.tabset}
+
+#### Run UMAP with min_dist = 0.1
+
+```{r}
+umap_result <- umap::umap(normalized_filtered_data, min_dist = 0.1)
+plot_UMAP(umap_result$layout[,1], umap_result$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Value of min_dist 0.1") + labs(color = "Strain", shape = "Replicate")
+```
+
+#### Run UMAP with min_dist = 0.5
+```{r}
+umap_result <- umap::umap(normalized_filtered_data, min_dist = 0.5)
+plot_UMAP(umap_result$layout[,1], umap_result$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Value of min_dist 0.5") + labs(color = "Strain", shape = "Replicate")
+```
+
+#### Run UMAP with min_dist = 0.9
+```{r}
+umap_result <- umap::umap(normalized_filtered_data, min_dist = 0.9)
+plot_UMAP(umap_result$layout[,1], umap_result$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Value of min_dist 0.9") + labs(color = "Strain", shape = "Replicate")
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+
+The values that UMAP uses for min_dist goes from 0 to 1.
+Smaller values of min_dist result in a more tightly packed local structure in the embedding. Points that are similar in the high-dimensional space will be closer together in the low-dimensional space. Moreover, larger values of min_dist results in a more evenly distributed representation of the data. So large values like 0.9 will lead to more sparse clusters, compared to small values like 0.1 that creates more tight clusters.
+
+:::
+
+
+### UMAP Visualization with different Metrics distances {.tabset}
+
+Experimenting with different distance metrics can be an essential part of the exploratory data analysis process, helping you uncover meaningful patterns and gain insights into the structure of the biological data.
+The selection of the right metric is crucial, as it can shape the visual representation of the underlying biological patterns. Here, we delve into the significance of employing various distance metrics in UMAP visualizations.
+
+
+#### Run UMAP with Euclidean metric
+```{r}
+umap_result <- umap::umap(normalized_filtered_data, metric = "euclidean")
+plot_UMAP(umap_result$layout[,1], umap_result$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Euclidean Distance") + labs(color = "Strain", shape = "Replicate")
+```
+
+#### Run UMAP with Manhattan metric
+```{r}
+umap_result <- umap::umap(normalized_filtered_data, metric = "manhattan")
+plot_UMAP(umap_result$layout[,1], umap_result$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Manhattan Distance") + labs(color = "Strain", shape = "Replicate")
+```
+
+#### Run UMAP with Cosine metric
+```{r}
+umap_result <- umap::umap(normalized_filtered_data, metric = "cosine")
+plot_UMAP(umap_result$layout[,1], umap_result$layout[,2], filtered_metadata$strain, sha = filtered_metadata$replicate, "UMAP: Cosine Distance") + labs(color = "Strain", shape = "Replicate")
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+The way of calculating the distances can produce different outcomes depending on the nature of the data. The distribution of the data should be taken into account when choosing the distance method.
+
+· Euclidean distances compute a straight-line distance between two points in a Euclidean space, using the mean. So in a sparse data distribution, it won't represent the true characteristics of the data.
+
+· Manhattan distance is computed with the absolute differences of the sample coordinates, using the overall shape instead of the mean shape.
+
+·Cosine distance ignores the magnitude of the vectors between the samples and focuses on the orientation.
+
+In this case, euclidean distance shows a better separation of the data between strains.
+
+:::
+
+
+# QUESTION #9: Final interpretation {.tabset}
+
+```{r}
+components <- as_tibble(pca_norm$x) %>% bind_cols(filtered_metadata) %>% as.data.frame()
+components$total <- rowSums(normalized_filtered_data)
+```
+
+### PCA Strain
+```{r}
+
+ggplot(components, aes(x = PC1, y = PC2, color = totalExpression, shape = strain)) + geom_point() + scale_color_gradient(name = "Expression", low = "#00FF00", high = "#FF0000") + theme_linedraw() + labs(title = "PCA by Strain and Total Expression", shape = "Strain") + scale_shape_manual(values = c(16, 3)) 
+
+```
+
+
+### PCA Time
+```{r}
+ggplot(components, aes(x = PC1, y = PC2, color = totalExpression, shape = time)) + geom_point() + scale_colour_gradient(name = "Expression", low = "green", high = "red") + theme_linedraw() + labs(title = "PCA by Time and Total Expression", shape = "Time")
+```
+
+### tSNE Strain
+```{r}
+tsne_plot <- data.frame(
+    x = X_tsne$Y[, 1],
+    y = X_tsne$Y[, 2],
+    col = as.factor(filtered_metadata$replicate),
+    sha = filtered_metadata$strain
+  )
+# Plot grouping by Strain
+ggplot(tsne_plot) + geom_point(aes(x=x, y=y, color=filtered_metadata$totalExpression, shape = sha)) + scale_color_gradient(low = "green", high = "red") +
+  theme_light() + labs(color = "Expression", shape = "Strain", title = "t-SNE by Strain and Total Expression")
+```
+
+### tSNE Time
+```{r  cache=TRUE}
+tsne_plot <- data.frame(
+    x = X_tsne$Y[, 1],
+    y = X_tsne$Y[, 2],
+    col = as.factor(filtered_metadata$replicate),
+    sha = filtered_metadata$time
+  )
+# Plot grouping by Strain
+ggplot(tsne_plot) + geom_point(aes(x=x, y=y, color=filtered_metadata$totalExpression, shape = sha)) + scale_color_gradient(low = "green", high = "red") +
+  theme_light() + labs(color = "Expression", shape = "Time", title = "t-SNE by Time and Total Expression")
+```
+
+
+#### UMAP final interpretation Strain
+```{r}
+normal_UMAP <- umap::umap(normalized_filtered_data)
+
+data_plot <- data.frame(x = normal_UMAP$layout[,1], y = normal_UMAP$layout[,2], col = filtered_metadata$totalExpression, sha = filtered_metadata$strain)
+
+UMAP_plot_normal <- ggplot(data_plot, aes(x = x, y = y, col = col, shape = sha)) + geom_point() + theme_light() + scale_color_gradient(low = "#00FF00", high = "#FF0000") + labs(color = "Expression", shape = "Strain", title = "UMAP by strain") + scale_shape_manual(values = c(16, 3)) 
+
+UMAP_plot_normal
+```
+
+#### UMAP final interpretation Time
+```{r}
+normal_UMAP <- umap::umap(normalized_filtered_data)
+
+data_plot <- data.frame(x = normal_UMAP$layout[,1], y = normal_UMAP$layout[,2], col = filtered_metadata$totalExpression, sha = filtered_metadata$time)
+
+UMAP_plot_normal <- ggplot(data_plot, aes(x = x, y = y, col = col, shape = sha)) + geom_point() + theme_light() + scale_color_gradient(low = "#00FF00", high = "#FF0000") + labs(color = "Expression", shape = "Time", title = "UMAP by time") 
+
+UMAP_plot_normal
+```
+
+## {-}
+
+::: {.question_box data-latex=""}
+**Interpretation: ** 
+As we know, all methods have their strengths and weaknesses, but some of them can be better fitted depending on specific characteristics of the data; UMAP for example, is known to be faster and combines linear dimensionaliy reduction techniques (such as PCA) with non linear techniques (like tSNE). 
+
+The interpretability also varies depending on the technique. Principal components may not always preserve local or non-linear structures present in the data; tSNE preserves local structures well, but the global structure might not be preserved accurately in lower dimensions; and UMAP maintains good preservation of both local and global structures.
+
+The final conclusions we can get from all techniques is that there is a clear separation of the samples by strain, and no clear relation between the distribution of the data and the timing variable. We can see difference in the expression level within the samples from the same time measurement that could be further studied with other characteristics of the samples.
+
+:::
+
